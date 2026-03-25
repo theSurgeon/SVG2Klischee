@@ -1,3 +1,13 @@
+bl_info = {
+    "name": "SVG → Klischee Generator",
+    "author": "SVG2Klischee",
+    "version": (1, 0, 0),
+    "blender": (3, 0, 0),
+    "location": "View3D › N-Panel › Klischee",
+    "description": "Erzeugt ein druckfähiges 3D-Klischee für den Heidelberg-Tiegel aus einer SVG-Datei",
+    "category": "Import-Export",
+}
+
 """
 SVG → Heidelberg-Tiegel Klischee Generator
 ===========================================
