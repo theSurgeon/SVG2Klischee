@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SVG2Klischee – Web</title>
+<script src="https://cdn.jsdelivr.net/npm/earcut@2.2.4/dist/earcut.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: #1a1a1a;
+    color: #e0e0e0;
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ── Sidebar ─────────────────────────────────────────────────── */
+  #sidebar {
+    width: 280px;
+    min-width: 280px;
+    background: #252525;
+    border-right: 1px solid #333;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    padding: 16px;
+    gap: 14px;
+  }
+
+  #sidebar h1 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #f0a020;
+    letter-spacing: 0.04em;
+  }
+
+  #sidebar h1 span { color: #aaa; font-weight: 400; font-size: 0.75rem; }
+
+  .section-title {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #888;
+    margin-bottom: 4px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #333;
+  }
+
+  .field { display: flex; flex-direction: column; gap: 4px; }
+
+  label {
+    font-size: 0.78rem;
+    color: #bbb;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  label span { color: #888; font-size: 0.72rem; }
+
+  input[type="number"] {
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #e0e0e0;
+    padding: 5px 8px;
+    font-size: 0.82rem;
+    width: 100%;
+  }
+
+  input[type="number"]:focus {
+    outline: none;
+    border-color: #f0a020;
+  }
+
+  .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.82rem;
+    cursor: pointer;
+  }
+
+  input[type="checkbox"] {
+    accent-color: #f0a020;
+    width: 15px;
+    height: 15px;
+    cursor: pointer;
+  }
+
+  /* ── File drop zone ───────────────────────────────────────────── */
+  #drop-zone {
+    border: 2px dashed #444;
+    border-radius: 8px;
+    padding: 18px 10px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    font-size: 0.82rem;
+    color: #888;
+  }
+
+  #drop-zone:hover, #drop-zone.drag-over {
+    border-color: #f0a020;
+    background: #2a2410;
+    color: #f0a020;
+  }
+
+  #drop-zone svg { display: block; margin: 0 auto 8px; opacity: 0.5; }
+  #drop-zone.has-file { border-color: #4a8; color: #4a8; }
+  #file-name { font-size: 0.72rem; margin-top: 4px; color: #888; word-break: break-all; }
+  #file-input { display: none; }
+
+  /* ── Buttons ──────────────────────────────────────────────────── */
+  button {
+    border: none;
+    border-radius: 6px;
+    padding: 9px 14px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    transition: opacity 0.15s, transform 0.1s;
+  }
+
+  button:active { transform: scale(0.97); }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  #btn-generate {
+    background: #f0a020;
+    color: #1a1a1a;
+    width: 100%;
+  }
+
+  #btn-download {
+    background: #2a7a4a;
+    color: #fff;
+    width: 100%;
+  }
+
+  /* ── Status ───────────────────────────────────────────────────── */
+  #status {
+    font-size: 0.75rem;
+    color: #888;
+    padding: 6px 8px;
+    background: #1a1a1a;
+    border-radius: 4px;
+    min-height: 32px;
+    line-height: 1.5;
+  }
+
+  #status.error { color: #e06060; }
+  #status.ok    { color: #4a8; }
+
+  /* ── Canvas ───────────────────────────────────────────────────── */
+  #canvas-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+
+  #canvas-wrap canvas { display: block; }
+
+  #canvas-hint {
+    position: absolute;
+    bottom: 12px;
+    right: 16px;
+    font-size: 0.7rem;
+    color: #555;
+    pointer-events: none;
+    line-height: 1.6;
+    text-align: right;
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Sidebar ──────────────────────────────────────────────────── -->
+<aside id="sidebar">
+
+  <h1>SVG2Klischee <span>Web</span></h1>
+
+  <!-- SVG Upload -->
+  <div>
+    <div class="section-title">SVG-Datei</div>
+    <div id="drop-zone" title="SVG-Datei auswählen oder hierher ziehen">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+        <polyline points="17 8 12 3 7 8"/>
+        <line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      SVG auswählen oder ablegen
+      <div id="file-name">Keine Datei ausgewählt</div>
+    </div>
+    <input type="file" id="file-input" accept=".svg,image/svg+xml">
+  </div>
+
+  <!-- Plattenparameter -->
+  <div>
+    <div class="section-title">Druckplatte</div>
+    <div class="field">
+      <label>Träger (Dicke) <span>mm</span></label>
+      <input type="number" id="plate-thick"  value="0.25" min="0.1" max="5" step="0.05">
+    </div>
+    <div class="field">
+      <label>Rand (Margin) <span>mm</span></label>
+      <input type="number" id="margin"       value="5"   min="0" max="30" step="0.5">
+    </div>
+    <div id="plate-size-info" style="font-size:0.72rem;color:#666;padding:3px 0;">Platte: — × — mm</div>
+  </div>
+
+  <!-- Reliefparameter -->
+  <div>
+    <div class="section-title">Relief</div>
+    <div class="field">
+      <label>Relieftiefe <span>mm</span></label>
+      <input type="number" id="relief-depth" value="0.71" min="0.1" max="3" step="0.01">
+    </div>
+  </div>
+
+    <label class="checkbox-row" style="margin-top:6px">
+      <input type="checkbox" id="use-taper" checked>
+      Konische Basis (Taper)
+    </label>
+    <div class="field" style="margin-top:4px">
+      <label>Taper-Betrag <span>mm</span></label>
+      <input type="number" id="taper-amount" value="0.3" min="0.01" max="2" step="0.05">
+    </div>
+  </div>
+
+  <!-- Optionen -->
+  <div>
+    <div class="section-title">Optionen</div>
+    <label class="checkbox-row">
+      <input type="checkbox" id="mirror-motif" checked>
+      Motiv spiegeln (Druckseite)
+    </label>
+  </div>
+
+  <!-- Aktionen -->
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <button id="btn-generate" disabled>Klischee generieren</button>
+    <button id="btn-download" disabled>STL herunterladen</button>
+  </div>
+
+  <div id="status">Bitte SVG-Datei auswählen.</div>
+
+</aside>
+
+<!-- ── 3D-Canvas ─────────────────────────────────────────────────── -->
+<div id="canvas-wrap">
+  <div id="canvas-hint">
+    Linke Taste: Drehen<br>
+    Mausrad: Zoom<br>
+    Rechte Taste: Verschieben
+  </div>
+</div>
+
+<!-- ── Three.js via importmap ──────────────────────────────────── -->
+<script type="importmap">
+{
+  "imports": {
+    "three":         "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE        from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { SVGLoader }     from 'three/addons/loaders/SVGLoader.js';
+import { STLExporter }   from 'three/addons/exporters/STLExporter.js';
+
+// ═══════════════════════════════════════════════════════════════════
+// Three.js Scene
+// ═══════════════════════════════════════════════════════════════════
+const wrap = document.getElementById('canvas-wrap');
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setClearColor(0x111111);
+renderer.shadowMap.enabled = true;
+wrap.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.4);
+dirLight.position.set(60, 80, 100);
+dirLight.castShadow = true;
+scene.add(dirLight);
+
+const fillLight = new THREE.DirectionalLight(0x8090ff, 0.3);
+fillLight.position.set(-40, -60, 30);
+scene.add(fillLight);
+
+const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 5000);
+camera.position.set(0, -150, 100);
+camera.lookAt(0, 0, 0);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+
+// Grid (XY-Ebene, passt zu Z=up)
+const grid = new THREE.GridHelper(300, 30, 0x2a2a2a, 0x222222);
+grid.rotation.x = Math.PI / 2;
+scene.add(grid);
+
+function resize() {
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+resize();
+window.addEventListener('resize', resize);
+
+(function loop() {
+  requestAnimationFrame(loop);
+  controls.update();
+  renderer.render(scene, camera);
+})();
+
+// ═══════════════════════════════════════════════════════════════════
+// Konstanten & Materialien
+// ═══════════════════════════════════════════════════════════════════
+const PX_TO_MM = 25.4 / 96.0;   // SVG-px → mm (96 dpi Standard)
+
+const matPlate = new THREE.MeshStandardMaterial({
+  color: 0x8898a8, roughness: 0.65, metalness: 0.45,
+});
+const matRelief = new THREE.MeshStandardMaterial({
+  color: 0xd4aa30, roughness: 0.38, metalness: 0.35,
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// UI
+// ═══════════════════════════════════════════════════════════════════
+const dropZone    = document.getElementById('drop-zone');
+const fileInput   = document.getElementById('file-input');
+const fileNameEl  = document.getElementById('file-name');
+const btnGenerate = document.getElementById('btn-generate');
+const btnDownload = document.getElementById('btn-download');
+const statusEl    = document.getElementById('status');
+
+let svgText       = null;
+let klischeeGroup = null;
+let stlBlob       = null;
+let loadedFileName = 'klischee';
+
+function setStatus(msg, type = '') {
+  statusEl.textContent = msg;
+  statusEl.className   = type;
+}
+
+// ── Datei laden ──────────────────────────────────────────────────────
+function loadFile(file) {
+  if (!file) return;
+  if (!file.name.toLowerCase().endsWith('.svg')) {
+    setStatus('Nur SVG-Dateien (.svg) werden unterstützt.', 'error');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = e => {
+    svgText = e.target.result;
+    loadedFileName = file.name.replace(/\.svg$/i, '');
+    fileNameEl.textContent = file.name;
+    dropZone.classList.add('has-file');
+    btnGenerate.disabled = false;
+    setStatus(`"${file.name}" geladen. Jetzt "Klischee generieren" klicken.`);
+  };
+  reader.readAsText(file);
+}
+
+dropZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => loadFile(e.target.files[0]));
+dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', ()  => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  loadFile(e.dataTransfer.files[0]);
+});
+
+// ── Parameter ────────────────────────────────────────────────────────
+function getParams() {
+  return {
+    plateT:      parseFloat(document.getElementById('plate-thick').value)  || 0.25,
+    margin:      parseFloat(document.getElementById('margin').value)       || 5,
+    reliefD:     parseFloat(document.getElementById('relief-depth').value) || 0.71,
+    mirror:      document.getElementById('mirror-motif').checked,
+    useTaper:    document.getElementById('use-taper').checked,
+    taperAmount: parseFloat(document.getElementById('taper-amount').value) || 0.3,
+  };
+}
+
+// ── Generieren ───────────────────────────────────────────────────────
+btnGenerate.addEventListener('click', () => {
+  if (!svgText) return;
+  setStatus('Verarbeite SVG …');
+  btnGenerate.disabled = true;
+  btnDownload.disabled = true;
+  stlBlob = null;
+
+  // Kleines Timeout, damit der Browser den Status-Text rendern kann
+  setTimeout(() => {
+    try {
+      buildKlischee();
+      setStatus('Klischee erstellt — STL-Download bereit.', 'ok');
+      btnDownload.disabled = false;
+    } catch (err) {
+      setStatus('Fehler: ' + err.message, 'error');
+      console.error(err);
+    } finally {
+      btnGenerate.disabled = false;
+    }
+  }, 30);
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Kern-Logik: SVG → 3D-Klischee
+// ═══════════════════════════════════════════════════════════════════
+function buildKlischee() {
+  const p = getParams();
+
+  // ── 1. SVG parsen ─────────────────────────────────────────────────
+  const loader = new SVGLoader();
+  const data   = loader.parse(svgText);
+
+  if (!data.paths.length) throw new Error('Keine Pfade im SVG gefunden.');
+
+  // ── 2. Shapes gewinnen ────────────────────────────────────────────
+  //    SVGLoader.createShapes behandelt fill-rule und Löcher korrekt.
+  const allShapes = [];
+  for (const path of data.paths) {
+    const shapes = SVGLoader.createShapes(path);
+    for (const s of shapes) allShapes.push(s);
+  }
+
+  if (!allShapes.length) {
+    throw new Error(
+      'Keine füllbaren Flächen gefunden.\n' +
+      'Tipp: SVG muss geschlossene Pfade mit fill ≠ none enthalten.'
+    );
+  }
+
+  // ── 3. Bounding Box in SVG-px ─────────────────────────────────────
+  let minX =  Infinity, maxX = -Infinity;
+  let minY =  Infinity, maxY = -Infinity;
+
+  for (const shape of allShapes) {
+    // getPoints liefert eine dichte Punktwolke (genug für eine gute BB)
+    for (const pt of shape.getPoints(64)) {
+      if (pt.x < minX) minX = pt.x;
+      if (pt.x > maxX) maxX = pt.x;
+      if (pt.y < minY) minY = pt.y;
+      if (pt.y > maxY) maxY = pt.y;
+    }
+    // Auch Löcher berücksichtigen
+    for (const hole of shape.holes) {
+      for (const pt of hole.getPoints(16)) {
+        if (pt.x < minX) minX = pt.x;
+        if (pt.x > maxX) maxX = pt.x;
+        if (pt.y < minY) minY = pt.y;
+        if (pt.y > maxY) maxY = pt.y;
+      }
+    }
+  }
+
+  const svgW_px = maxX - minX;
+  const svgH_px = maxY - minY;
+  if (svgW_px < 0.001 || svgH_px < 0.001) {
+    throw new Error('SVG hat keine messbare Ausdehnung.');
+  }
+
+  // ── 4. Skalierung & Plattengröße ─────────────────────────────────
+  //
+  //  Physische Maße aus SVG-Attributen lesen:
+  //  width="100mm" / width="297mm" → direkt in mm
+  //  width="1234"  (px / unitless)  → 25.4/96 mm pro px (96 dpi CSS-Standard)
+  //  Erst wenn width/height physische Einheiten tragen, ist der Maßstab verlässlich.
+  const svgDoc = new DOMParser().parseFromString(svgText, 'image/svg+xml');
+  const scale = svgMmPerUnit(svgDoc, svgW_px);
+
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const mirrorSign = p.mirror ? -1 : 1;
+
+  // Szene bereinigen
+  if (klischeeGroup) {
+    scene.remove(klischeeGroup);
+    klischeeGroup.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+  }
+  klischeeGroup = new THREE.Group();
+  scene.add(klischeeGroup);
+
+  // ── 5. Relief-Geometrien zuerst bauen ─────────────────────────────
+  //  Reihenfolge: Relief → exakte BB aus Vertices → Platte
+  //  So werden Taper-Miter-Überstand und Béziernäherung automatisch erfasst.
+  const reliefMeshes = [];
+  for (const shape of allShapes) {
+    let geo;
+
+    if (p.useTaper) {
+      geo = buildTaperedPrism(shape, p.reliefD, p.taperAmount, cx, cy, scale, mirrorSign);
+    } else {
+      geo = new THREE.ExtrudeGeometry(shape, { depth: p.reliefD, bevelEnabled: false });
+
+      const pos = geo.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        pos.setXYZ(i,
+          (pos.getX(i) - cx) * scale * mirrorSign,
+          -(pos.getY(i) - cy) * scale,
+          pos.getZ(i)
+        );
+      }
+      pos.needsUpdate = true;
+
+      if (!p.mirror && geo.index) {
+        const idx = geo.index;
+        for (let i = 0; i < idx.count; i += 3) {
+          const a = idx.getX(i), b = idx.getX(i + 1);
+          idx.setX(i, b); idx.setX(i + 1, a);
+        }
+        idx.needsUpdate = true;
+      }
+      geo.computeVertexNormals();
+    }
+
+    const mesh = new THREE.Mesh(geo, matRelief);
+    mesh.position.z = p.plateT + 0.001;  // 1µm über Plattenoberseite → kein Z-Fighting
+    mesh.castShadow    = false;
+    mesh.receiveShadow = false;
+    reliefMeshes.push(mesh);
+  }
+
+  // ── 5b. Exakte XY-BoundingBox aus fertigen Vertex-Positionen ───────
+  let rMinX = Infinity, rMaxX = -Infinity;
+  let rMinY = Infinity, rMaxY = -Infinity;
+  for (const mesh of reliefMeshes) {
+    const pos = mesh.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i);
+      if (x < rMinX) rMinX = x;
+      if (x > rMaxX) rMaxX = x;
+      if (y < rMinY) rMinY = y;
+      if (y > rMaxY) rMaxY = y;
+    }
+  }
+  const realW  = rMaxX - rMinX;
+  const realH  = rMaxY - rMinY;
+  const realCX = (rMinX + rMaxX) / 2;
+  const realCY = (rMinY + rMaxY) / 2;
+
+  const plateW = realW + 2 * p.margin;
+  const plateH = realH + 2 * p.margin;
+
+  console.log('=== Klischee Debug ===');
+  console.log('Taper:', p.useTaper, 'taperAmount:', p.taperAmount);
+  console.log('Relief BB  X:', rMinX.toFixed(3), '→', rMaxX.toFixed(3), ' W:', realW.toFixed(3));
+  console.log('Relief BB  Y:', rMinY.toFixed(3), '→', rMaxY.toFixed(3), ' H:', realH.toFixed(3));
+  console.log('Plate center:', realCX.toFixed(3), realCY.toFixed(3));
+  console.log('Plate size:  ', plateW.toFixed(3), '×', plateH.toFixed(3));
+
+  document.getElementById('plate-size-info').textContent =
+    `Platte: ${plateW.toFixed(1)} × ${plateH.toFixed(1)} mm`;
+
+  // ── 5c. Grundplatte passend zur echten Geometrie ───────────────────
+  const plateGeo  = new THREE.BoxGeometry(plateW, plateH, p.plateT);
+  const plateMesh = new THREE.Mesh(plateGeo, matPlate);
+  plateMesh.position.set(realCX, realCY, p.plateT / 2);
+  plateMesh.receiveShadow = true;
+  klischeeGroup.add(plateMesh);
+
+  for (const mesh of reliefMeshes) klischeeGroup.add(mesh);
+
+  // ── 6. Kamera anpassen ────────────────────────────────────────────
+  const maxDim  = Math.max(plateW, plateH);
+  const zCenter = (p.plateT + p.reliefD) / 2;
+  camera.position.set(realCX, realCY - maxDim * 1.2, maxDim * 0.9);
+  controls.target.set(realCX, realCY, zCenter);
+  camera.lookAt(realCX, realCY, zCenter);
+  controls.update();
+
+  // ── 7. STL erzeugen ───────────────────────────────────────────────
+  // matrixWorld muss vor dem Export aktualisiert sein, da der Render-Loop
+  // die Matrizen erst beim nächsten Frame aktualisiert.
+  klischeeGroup.updateMatrixWorld(true);
+
+  const exporter  = new STLExporter();
+  const stlBuffer = exporter.parse(klischeeGroup, { binary: true });
+  stlBlob = new Blob([stlBuffer], { type: 'application/octet-stream' });
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SVG-Maßstab: mm pro SVG-User-Unit
+// ═══════════════════════════════════════════════════════════════════
+/**
+ * Liest die physischen Dimensionen aus dem <svg>-Element und berechnet
+ * den Maßstab mm/User-Unit.
+ *
+ * Unterstützte width/height-Einheiten: mm, cm, in, pt, pc, px (unitless = px).
+ * Wenn width in mm angegeben ist und ein viewBox existiert, wird das Verhältnis
+ * width_mm / viewBox_width als mm/Unit verwendet.
+ *
+ * @param {XMLDocument} svgXml    – data.xml aus SVGLoader.parse()
+ * @param {number}      svgW_px   – Breite der Bounding Box in User-Units (Fallback)
+ */
+function svgMmPerUnit(svgXml, svgW_px) {
+  const el = svgXml?.documentElement;
+  if (!el) return PX_TO_MM;
+
+  // Einen CSS-Längenstring in mm umwandeln.
+  // Gibt null zurück wenn keine physische Einheit erkannt wird (= unitless/px).
+  function toMM(attr) {
+    if (!attr) return null;
+    const m = attr.trim().match(/^([\d.]+)\s*(mm|cm|in|pt|pc|px)?$/i);
+    if (!m) return null;
+    const n = parseFloat(m[1]);
+    switch ((m[2] || 'px').toLowerCase()) {
+      case 'mm': return n;
+      case 'cm': return n * 10;
+      case 'in': return n * 25.4;
+      case 'pt': return n * 25.4 / 72;
+      case 'pc': return n * 25.4 / 6;
+      default:   return null;   // px / unitless → kein physisches Maß
+    }
+  }
+
+  const wMM = toMM(el.getAttribute('width'));
+  if (!wMM || wMM <= 0) return PX_TO_MM;
+
+  // SVGLoader liefert Pfade in viewBox-User-Units (kein CSS-px-Transform).
+  // Korrekter Maßstab: mm/unit = physische_Breite / viewBox_Breite
+  // Beispiel CorelDraw A4: 210.002mm / 21000.16 units = 0.01 mm/unit
+  const vbAttr = el.getAttribute('viewBox');
+  if (vbAttr) {
+    const parts = vbAttr.trim().split(/[\s,]+/);
+    const vbW = parseFloat(parts[2]);
+    if (vbW > 0) return wMM / vbW;
+  }
+
+  // Kein viewBox: Motivgrösse als Näherung (funktioniert wenn Motiv Leinwand füllt)
+  if (svgW_px > 0) return wMM / svgW_px;
+  return PX_TO_MM;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Taper: konisches Prisma direkt aus Konturpunkten
+// ═══════════════════════════════════════════════════════════════════
+/**
+ * Verschiebt jeden Konturpunkt entlang der gemittelten Außennormale.
+ * Wicklungsrichtung wird aus dem Vorzeichenflächeninhalt (Shoelace) bestimmt.
+ *   offset > 0 → nach außen (von Innenraum weg)
+ *   offset < 0 → nach innen
+ */
+function offsetContour(pts, offset) {
+  const n = pts.length;
+  let area = 0;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    area += pts[i].x * pts[j].y - pts[j].x * pts[i].y;
+  }
+  // area ≥ 0 → CCW → außen = rechts von Bewegungsrichtung = (dy, -dx)
+  const sign = area >= 0 ? 1 : -1;
+
+  return pts.map((curr, i) => {
+    const prev = pts[(i - 1 + n) % n];
+    const next = pts[(i + 1) % n];
+    const dx0 = curr.x - prev.x, dy0 = curr.y - prev.y;
+    const dx1 = next.x - curr.x, dy1 = next.y - curr.y;
+    let nx = sign * (dy0 + dy1);
+    let ny = sign * -(dx0 + dx1);
+    const len = Math.sqrt(nx * nx + ny * ny);
+    if (len > 1e-10) { nx /= len; ny /= len; }
+    return new THREE.Vector2(curr.x + nx * offset, curr.y + ny * offset);
+  });
+}
+
+/**
+ * Baut ein konisches Prisma als BufferGeometry:
+ *   Druckfläche (z=reliefD): Original-Kontur
+ *   Basis       (z=0):       Außenkontur expandiert, Löcher kontrahiert
+ *
+ * Seitenwände werden explizit mit Taper konstruiert —
+ * kein ExtrudeGeometry, keine nachträgliche Vertex-Modifikation.
+ */
+function buildTaperedPrism(shape, reliefD, taperAmt, cx, cy, scale, mirrorSign) {
+  const res = 24;
+
+  // SVG-px → mm, nur y-Flip — Mirror wird erst nach der Triangulierung
+  // auf die Vertex-Positionen angewendet. So ist der Input für
+  // ShapeUtils.triangulateShape (Earcut) immer CCW und liefert konsistente
+  // Dreiecks-Wicklung unabhängig vom Mirror-Flag.
+  const tx = pts => pts.map(p => new THREE.Vector2(
+    (p.x - cx) * scale,
+    -(p.y - cy) * scale
+  ));
+
+  const outerTop  = tx(shape.getPoints(res));
+  const holesTop  = shape.holes.map(h => tx(h.getPoints(res)));
+
+  // Basis: outer nach außen, Löcher nach innen (Material wird unten breiter)
+  const outerBase = offsetContour(outerTop,  +taperAmt);
+  const holesBase = holesTop.map(h => offsetContour(h, -taperAmt));
+
+  // Flache Listen für Triangulierung
+  const flatTop  = [outerTop,  ...holesTop ].flat();
+  const flatBase = [outerBase, ...holesBase].flat();
+
+  // Triangulierung mit Earcut (robuster als THREE.ShapeUtils)
+  function triangulateWithEarcut(outer, holes) {
+    const coords = [];
+    const holeIndices = [];
+
+    // Äußere Kontur
+    for (const pt of outer) {
+      coords.push(pt.x, pt.y);
+    }
+
+    // Löcher
+    for (const hole of holes) {
+      holeIndices.push(coords.length / 2);
+      for (const pt of hole) {
+        coords.push(pt.x, pt.y);
+      }
+    }
+
+    // Earcut triangulieren
+    const triangles = earcut(coords, holeIndices);
+
+    // Konvertiere in das Format von THREE.ShapeUtils (Array von [a,b,c] Triplets)
+    const result = [];
+    for (let i = 0; i < triangles.length; i += 3) {
+      result.push([triangles[i], triangles[i+1], triangles[i+2]]);
+    }
+    return result;
+  }
+
+  const tris = triangulateWithEarcut(outerTop, holesTop);
+
+  const verts   = [];
+  const indices = [];
+  // Mirror erst hier auf x anwenden – nach der Triangulierung.
+  function v(x, y, z) { verts.push(x * mirrorSign, y, z); return verts.length / 3 - 1; }
+
+  // ── Druckfläche oben (z=reliefD), Normalen in +Z ──────────────────
+  const topOff = verts.length / 3;
+  for (const p of flatTop)  v(p.x, p.y, reliefD);
+  for (const [a, b, c] of tris) indices.push(topOff+a, topOff+b, topOff+c);
+
+  // ── Basis unten (z=0), Normalen in −Z → Winding umkehren ──────────
+  const baseOff = verts.length / 3;
+  for (const p of flatBase) v(p.x, p.y, 0);
+  for (const [a, b, c] of tris) indices.push(baseOff+a, baseOff+c, baseOff+b);
+
+  // ── Seitenwände: verbinden je top[i]→top[i+1] mit base[i]→base[i+1] ──
+  // Adaptive Winding-Erkennung pro Kontur. Für holes wird die Logik invertiert,
+  // weil die Windungskonvention für holes (Lochzentrum) entgegengesetzt ist.
+  function addWalls(topCtr, baseCtr, isHole = false) {
+    const n = topCtr.length;
+    let area = 0;
+    for (let k = 0; k < n; k++) {
+      const kn = (k + 1) % n;
+      area += topCtr[k].x * topCtr[kn].y - topCtr[kn].x * topCtr[k].y;
+    }
+    // CW (area < 0) braucht normaler reversed, aber für holes invertiert
+    let isCW = area < 0;
+    if (isHole) isCW = !isCW;  // Invertiere für holes!
+
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const t0 = v(topCtr[i].x,  topCtr[i].y,  reliefD);
+      const t1 = v(topCtr[j].x,  topCtr[j].y,  reliefD);
+      const b0 = v(baseCtr[i].x, baseCtr[i].y, 0);
+      const b1 = v(baseCtr[j].x, baseCtr[j].y, 0);
+      if (isCW)
+        indices.push(b0, t0, t1,  b0, t1, b1);
+      else
+        indices.push(t0, b0, t1,  t1, b0, b1);
+    }
+  }
+
+  addWalls(outerTop, outerBase, false);
+  for (let i = 0; i < holesTop.length; i++) addWalls(holesTop[i], holesBase[i], true);
+
+  // x-Flip (Mirror) kehrt die Wicklungsrichtung aller Dreiecke um.
+  // → erste zwei Indices jedes Dreiecks tauschen, um Normalen zu korrigieren.
+  if (mirrorSign < 0) {
+    for (let i = 0; i < indices.length; i += 3) {
+      const tmp = indices[i]; indices[i] = indices[i + 1]; indices[i + 1] = tmp;
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+// ── Download ──────────────────────────────────────────────────────────
+btnDownload.addEventListener('click', () => {
+  if (!stlBlob) return;
+  const url = URL.createObjectURL(stlBlob);
+  const a   = Object.assign(document.createElement('a'), {
+    href:     url,
+    download: `${loadedFileName}_klischee.stl`,
+  });
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+
+</script>
+</body>
+</html>
