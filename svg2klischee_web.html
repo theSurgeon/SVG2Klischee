@@ -1,261 +1,202 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="de-CH">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SVG2Klischee – Web</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>SVG2Klischee</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75,800&family=JetBrains+Mono:wght@400;500&family=Noto+Sans:wght@400;500;700&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/earcut@2.2.4/dist/earcut.min.js"></script>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+/* DCL-CI 1.5 (Design System «Durband Creative Laboratory»): Papier-Grund, Anthrazit-Tinte, Orange nur als Signal
+   (Label, Ziffer, kurze Linie), Mono-Meta als «Labor-Protokoll», alles eckig, UI-Radius 2 px.
+   Layout wie Prägeblock-Generator: Parameter-Spalte links, 3D-Vorschau rechts; auf dem Telefon untereinander.
+   Die CI kennt nur das Thema «Papier» – daher bewusst ohne Dunkelmodus. */
+:root {
+  color-scheme: light;
+  --papier: #e5e2dd;
+  --papier-hell: #f2f0ec;
+  --weiss: #ffffff;
+  --anthrazit: #232527;
+  --grau: #5e6064;
+  --linie: #c9c5bf;
+  --orange: #d45e3a;
+  --pastellblau: #6093ac;
+  --blau-200: #c6dae5;
+  --blau-100: #e3edf2;
+  --gelb-hell: #f9eeca;
+  --rot-hell: #f6d7d1;
+  --gruen-hell: #dcebd8;
+  /* Rollen */
+  --bg: var(--papier);
+  --panel: var(--papier-hell);
+  --fg: var(--anthrazit);
+  --line: var(--linie);
+  --relief: #6093ac;   /* Relief (Druckfläche): pastellblau */
+  --plate: #c6dae5;    /* Träger: blau-200 – heller, damit Relief und Träger über die Helligkeit unterscheidbar sind */
+  --view: #e5e2dd;
+  --f-display: "Archivo", "Archivo Narrow", "Arial Narrow", sans-serif;
+  --f-body: "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+  --f-mono: "JetBrains Mono", "IBM Plex Mono", Menlo, monospace;
+  --r-ui: 2px;
+}
 
-  body {
-    font-family: 'Segoe UI', system-ui, sans-serif;
-    background: #1a1a1a;
-    color: #e0e0e0;
-    display: flex;
-    height: 100vh;
-    overflow: hidden;
-  }
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--fg); font: 400 15px/22px var(--f-body); }
+.app { display: grid; grid-template-columns: minmax(310px, 372px) 1fr; height: 100%; }
+aside { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto;
+  padding-block: 20px 24px; padding-left: max(24px, env(safe-area-inset-left, 0px)); padding-right: 24px;
+  display: flex; flex-direction: column; gap: 22px; }
 
-  /* ── Sidebar ─────────────────────────────────────────────────── */
-  #sidebar {
-    width: 280px;
-    min-width: 280px;
-    background: #252525;
-    border-right: 1px solid #333;
-    display: flex;
-    flex-direction: column;
-    overflow-y: auto;
-    padding: 16px;
-    gap: 14px;
-  }
+/* Mono-Meta, wie Kopf-/Fusszeile im DCL-Raster */
+.meta { font: 500 11px/14px var(--f-mono); letter-spacing: .18em; text-transform: uppercase; color: var(--grau);
+  display: flex; justify-content: space-between; gap: 12px; }
+.meta .no { color: var(--orange); }
+.brand { display: grid; gap: 18px; }
+.logo { width: 132px; height: auto; display: block; }
+h1 { font: 800 46px/0.9 var(--f-display); font-stretch: 75%; text-transform: uppercase; letter-spacing: -0.01em;
+  margin: 0; text-wrap: balance; }
+h1 em { font-style: normal; color: var(--orange); }
+.lead { color: var(--grau); margin: 10px 0 0; max-width: 34em; }
 
-  #sidebar h1 {
-    font-size: 1.1rem;
-    font-weight: 700;
-    color: #f0a020;
-    letter-spacing: 0.04em;
-  }
+/* Abschnitts-Label: kurze orange Linie + Mono-Versalien */
+fieldset { border: 0; border-top: 1px solid var(--line); margin: 0; padding: 16px 0 0; display: grid; gap: 12px; min-width: 0; }
+legend, .label { font: 500 11px/14px var(--f-mono); letter-spacing: .18em; text-transform: uppercase; color: var(--orange);
+  padding: 0 8px 0 0; display: flex; align-items: center; gap: 8px; }
+legend::before, .label::before { content: ""; width: 22px; height: 1px; background: var(--orange); }
+.row { display: grid; grid-template-columns: 1fr 96px; align-items: center; gap: 12px; }
+.row label { font-size: 14px; line-height: 1.3; }
+.row small, .hint { color: var(--grau); font-size: 12px; line-height: 17px; display: block; }
+.row.off { opacity: .45; }
+input[type=number] { font: 400 13px/18px var(--f-mono); font-variant-numeric: tabular-nums; color: var(--fg); background: var(--weiss);
+  border: 1px solid var(--line); border-radius: var(--r-ui); padding: 7px 8px; width: 100%; text-align: right; }
+input[type=number]:hover { border-color: var(--grau); }
+input:focus-visible, button:focus-visible, .drop:focus-visible { outline: 2px solid var(--anthrazit); outline-offset: 2px; }
 
-  #sidebar h1 span { color: #aaa; font-weight: 400; font-size: 0.75rem; }
+.check { display: flex; align-items: center; gap: 10px; font-size: 14px; line-height: 1.3; cursor: pointer; }
+.check input { width: 16px; height: 16px; margin: 0; accent-color: var(--anthrazit); cursor: pointer; flex: none; }
 
-  .section-title {
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: #888;
-    margin-bottom: 4px;
-    padding-bottom: 4px;
-    border-bottom: 1px solid #333;
-  }
+.drop { border: 1px dashed var(--grau); border-radius: var(--r-ui); padding: 18px 16px; text-align: center; cursor: pointer;
+  display: grid; gap: 6px; background: var(--weiss); transition: border-color .15s, background .15s; }
+.drop:hover, .drop.drag-over { border-color: var(--anthrazit); border-style: solid; background: var(--blau-100); }
+.drop.has-file { border-style: solid; border-color: var(--anthrazit); }
+.drop strong { font: 800 22px/1 var(--f-display); font-stretch: 75%; text-transform: uppercase; }
+.file-name { font: 400 12px/17px var(--f-mono); color: var(--grau); word-break: break-all; }
 
-  .field { display: flex; flex-direction: column; gap: 4px; }
+button { font: 500 12px/16px var(--f-mono); letter-spacing: .12em; text-transform: uppercase; border-radius: var(--r-ui);
+  padding: 12px 14px; cursor: pointer; border: 1px solid var(--anthrazit); background: transparent; color: var(--anthrazit); width: 100%; }
+button:hover { background: var(--blau-100); }
+button.primary { background: var(--anthrazit); color: var(--weiss); }
+button.primary:hover { background: #000; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button:disabled:hover { background: transparent; }
+button.primary:disabled:hover { background: var(--anthrazit); }
 
-  label {
-    font-size: 0.78rem;
-    color: #bbb;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
+/* Meldung: Pastell-Hinterlegung + Mono-Label, Text immer anthrazit (Farbe nie einziges Signal) */
+.msg { border-radius: var(--r-ui); padding: 10px 12px; font-size: 13px; line-height: 19px; color: var(--anthrazit);
+  background: var(--weiss); white-space: pre-line; }
+.msg::before { display: block; font: 500 10px/14px var(--f-mono); letter-spacing: .18em; margin-bottom: 2px; color: var(--grau); content: "STATUS"; }
+.msg.error { background: var(--rot-hell); }
+.msg.error::before { content: "FEHLER"; }
+.msg.ok { background: var(--gruen-hell); }
+.msg.ok::before { content: "ERLEDIGT"; }
 
-  label span { color: #888; font-size: 0.72rem; }
+main { position: relative; min-width: 0; background: var(--view); }
+#canvas-wrap { position: absolute; inset: 0; }
+#canvas-wrap canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.view-meta { position: absolute; top: 18px; left: 24px; right: max(24px, env(safe-area-inset-right, 0px)); pointer-events: none; }
+.hud { position: absolute; left: 24px; right: max(24px, env(safe-area-inset-right, 0px)); bottom: 24px;
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: end; justify-content: space-between; pointer-events: none; }
+.card { pointer-events: auto; background: var(--papier-hell); border: 1px solid var(--line); padding: 12px 14px; }
+.legend { display: flex; gap: 16px; font-size: 12px; }
+.sw { display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px; border: 1px solid rgba(35,37,39,.25); }
 
-  input[type="number"] {
-    background: #1a1a1a;
-    border: 1px solid #444;
-    border-radius: 4px;
-    color: #e0e0e0;
-    padding: 5px 8px;
-    font-size: 0.82rem;
-    width: 100%;
-  }
+/* Label-Tabelle: Mono-Label orange links, Wert rechts, Haarlinien */
+.stats { display: grid; grid-template-columns: auto auto; column-gap: 18px; min-width: 230px; }
+.stats > div { display: contents; }
+.stats b, .stats span { padding: 5px 0; border-bottom: 1px solid var(--line); }
+.stats > div:last-child b, .stats > div:last-child span { border-bottom: 0; }
+.stats b { font: 500 10px/16px var(--f-mono); letter-spacing: .18em; text-transform: uppercase; color: var(--orange); }
+.stats span { font: 400 12px/16px var(--f-mono); font-variant-numeric: tabular-nums; text-align: right; }
 
-  input[type="number"]:focus {
-    outline: none;
-    border-color: #f0a020;
-  }
+.foot { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--line); }
+.foot a { color: inherit; text-decoration: none; }
+.foot a:hover { color: var(--anthrazit); }
 
-  .checkbox-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 0.82rem;
-    cursor: pointer;
-  }
-
-  input[type="checkbox"] {
-    accent-color: #f0a020;
-    width: 15px;
-    height: 15px;
-    cursor: pointer;
-  }
-
-  /* ── File drop zone ───────────────────────────────────────────── */
-  #drop-zone {
-    border: 2px dashed #444;
-    border-radius: 8px;
-    padding: 18px 10px;
-    text-align: center;
-    cursor: pointer;
-    transition: border-color 0.2s, background 0.2s;
-    font-size: 0.82rem;
-    color: #888;
-  }
-
-  #drop-zone:hover, #drop-zone.drag-over {
-    border-color: #f0a020;
-    background: #2a2410;
-    color: #f0a020;
-  }
-
-  #drop-zone svg { display: block; margin: 0 auto 8px; opacity: 0.5; }
-  #drop-zone.has-file { border-color: #4a8; color: #4a8; }
-  #file-name { font-size: 0.72rem; margin-top: 4px; color: #888; word-break: break-all; }
-  #file-input { display: none; }
-
-  /* ── Buttons ──────────────────────────────────────────────────── */
-  button {
-    border: none;
-    border-radius: 6px;
-    padding: 9px 14px;
-    cursor: pointer;
-    font-size: 0.85rem;
-    font-weight: 600;
-    transition: opacity 0.15s, transform 0.1s;
-  }
-
-  button:active { transform: scale(0.97); }
-  button:disabled { opacity: 0.35; cursor: not-allowed; }
-
-  #btn-generate {
-    background: #f0a020;
-    color: #1a1a1a;
-    width: 100%;
-  }
-
-  #btn-download {
-    background: #2a7a4a;
-    color: #fff;
-    width: 100%;
-  }
-
-  /* ── Status ───────────────────────────────────────────────────── */
-  #status {
-    font-size: 0.75rem;
-    color: #888;
-    padding: 6px 8px;
-    background: #1a1a1a;
-    border-radius: 4px;
-    min-height: 32px;
-    line-height: 1.5;
-  }
-
-  #status.error { color: #e06060; }
-  #status.ok    { color: #4a8; }
-
-  /* ── Canvas ───────────────────────────────────────────────────── */
-  #canvas-wrap {
-    flex: 1;
-    position: relative;
-    overflow: hidden;
-  }
-
-  #canvas-wrap canvas { display: block; }
-
-  #canvas-hint {
-    position: absolute;
-    bottom: 12px;
-    right: 16px;
-    font-size: 0.7rem;
-    color: #555;
-    pointer-events: none;
-    line-height: 1.6;
-    text-align: right;
-  }
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: 52vh auto; height: auto; }
+  main { order: -1; height: 52vh; }
+  aside { border-right: 0; border-top: 1px solid var(--line); overflow: visible;
+    padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  h1 { font-size: 40px; }
+  .view-meta { display: none; }
+  .hud { left: 16px; right: 16px; bottom: 16px; }
+  .stats { min-width: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .drop { transition: none; } }
 </style>
 </head>
 <body>
 
-<!-- ── Sidebar ──────────────────────────────────────────────────── -->
-<aside id="sidebar">
+<div class="app">
+  <aside id="sidebar">
+    <header class="brand">
+      <div class="meta"><span>DCL — Werkzeug</span><span><span class="no">Nº 02</span> / Letterpress</span></div>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="815 240 3390 1180" class="logo" role="img" aria-label="Durband Creative Lab"><g fill="#232527" fill-rule="nonzero"><path d="M1664.57 824.01l-2.82 2.81c-36.6,34.73 -162.34,4.7 -291.85,4.7l-7.5 0 0 -5.63c0,-59.12 -62.88,-91.97 -140.77,-91.97 -368.8,0 -553.67,666.28 -202.7,666.28 158.6,0 223.35,-157.66 228.98,-238.36 3.75,-58.18 -27.22,-69.44 -46.92,-69.44 -28.16,0 -43.17,23.46 -39.42,45.98 13.14,-0.94 20.65,14.08 19.71,35.66 -2.81,57.24 -57.24,111.67 -119.18,111.67 -213.96,0 -55.37,-499.24 159.53,-499.24 36.6,0 58.18,23.46 57.25,53.49l-3.76 0.94c-48.8,10.32 -103.22,47.86 -115.42,72.26 4.69,19.71 21.58,49.74 60.99,49.74 39.42,0 100.42,-37.54 127.63,-87.28 70.38,3.76 130.44,40.35 198.94,40.35 52.56,0 91.97,-19.7 123.88,-84.45l-6.57 -7.51zm1119.54 71.32c29.09,25.34 47.86,68.5 47.86,134.19 0,100.41 -57.25,213.96 -110.74,213.96 -21.58,0 -30.97,-137.01 -15.01,-199.88 12.2,-44.11 30.97,-45.04 30.97,-45.04l-3.76 -15.96c-26.27,7.51 -95.72,23.46 -124.81,8.45l-12.2 14.07 7.51 11.27c-10.81,42.41 -16.3,87.77 -16.97,130.63 -1.84,4.55 -39.47,96.46 -81.57,96.46 -60.06,0 -4.69,-137.01 22.52,-200.82 16.9,-42.23 39.42,-44.1 39.42,-44.1l-3.76 -15.96c-25.33,8.45 -84.45,23.46 -114.48,8.45l-12.2 14.07c1.87,1.88 9.38,7.51 8.44,12.2 -18.95,56.24 -33.41,98.28 -44.8,131.33 -5.16,13.27 -38.55,94.83 -79.07,94.83 0,0 -0.94,0 -0.94,0l-0.94 0c-24.4,0 -29.09,-22.52 -26.27,-53.49 2.81,-20.64 21.58,-79.76 43.16,-144.51 10.33,0.94 21.59,1.87 31.91,1.87 45.98,-0.93 45.98,-44.1 35.66,-54.42 -18.77,7.5 -36.6,10.32 -53.49,10.32 22.52,-68.51 45.98,-131.38 52.55,-149.21 16.89,-42.23 40.35,-44.11 40.35,-44.11l-4.69 -15.95c-24.4,8.45 -84.46,23.46 -113.55,8.45l-13.13 14.07 8.44 12.2c-12.2,36.6 -32.84,99.47 -54.43,163.29 -8.44,-0.94 -15.95,-1.88 -24.4,-1.88 -44.1,0 -44.1,40.35 -39.41,53.49 11.26,-7.51 29.09,-9.38 49.74,-7.51l-38.96 116.21c-9.1,20.43 -43.28,91.18 -80.22,91.18 -60.06,0 -4.69,-136.07 20.65,-199.88 17.83,-42.23 41.29,-45.04 41.29,-45.04l-3.76 -15.96c-25.33,8.45 -80.7,24.4 -109.79,8.45l-9.39 26.27c-12.2,-17.83 -32.84,-34.72 -68.5,-34.72 -91.22,0 -159.53,109.72 -177.51,207.28 -30.84,41.64 -71.13,53.6 -104.02,53.6 -47.86,0 -83.52,-30.03 -81.64,-68.5l0 -1.88c10.32,12.2 24.4,20.65 44.1,20.65 57.25,0.94 126.69,-67.57 130.44,-135.14 3.76,-74.13 -65.69,-76.01 -78.82,-76.01 -93.51,0 -169.25,114.08 -179.95,213.14 -14.69,23.64 -34.47,46.8 -55.6,46.8 -60.06,0 -5.63,-137 20.65,-200.82 16.89,-42.23 39.41,-44.1 39.41,-44.1l-3.75 -15.96 -0.94 0c-35.66,12.2 -109.8,32.85 -185.81,18.77 0,-30.03 -13.14,-44.1 -30.97,-44.1 -13.14,0 -24.4,7.5 -30.03,16.89 33.79,31.9 11.26,105.1 -15.01,173.61 -11.26,24.39 -15.96,39.41 1.87,39.41 13.14,-27.21 31.91,-66.63 46.93,-103.23 23.46,3.76 49.73,2.82 74.13,-0.93l-39.41 115.42c-28.16,80.7 7.5,136.07 51.61,139.83 0.94,0 1.88,0 2.82,0l0.93 0 0.94 0c53.62,-0.7 92.76,-46.35 122.05,-97.86 5.95,56.24 37.67,98.79 121.01,98.79 56.06,0 101.73,-33.64 144.4,-99.44 0.17,56.26 22.03,99.44 72.37,99.44 46.92,0 81.65,-47.86 108.86,-102.28 -7.51,61.93 25.34,102.28 63.81,102.28 53.38,0 92.77,-44.41 122.21,-95.02 -3.66,58.23 29.06,95.02 65.47,95.02 53.7,0 91.23,-44.95 120.39,-95.95 -4.08,58.76 28.81,95.95 65.42,95.95 0.94,0 2.82,0 3.76,0l4.69 0c72.37,0 108.96,-81.65 139.71,-149.7 5.05,83.44 29.69,148.77 69.56,148.77 129.5,0 242.11,-215.84 242.11,-385.7 0,-110.73 -89.15,-104.16 -115.42,-56.3zm-1039.78 127.62c12.2,0 15.02,7.51 15.02,19.71 -2.82,37.54 -43.17,107.92 -88.22,107.92 -11.26,0 -15.95,-3.75 -23.46,-15.02 17.83,-55.36 61,-112.61 96.66,-112.61zm200.83 218.66c-69.45,0 -0.94,-218.66 76.01,-218.66 19.71,0 34.72,15.96 35.66,38.48l-15.95 48.8c-18.77,47.86 -56.31,131.38 -95.72,131.38zm575.25 -283.41c68.5,0 109.79,-117.3 45.04,-117.3 -77.89,0 -108.86,117.3 -45.04,117.3zm640.93 188.63c-30.96,76.95 -85.39,96.65 -127.62,96.65 -47.86,0 -83.52,-30.03 -81.64,-68.5l0 -1.88c10.32,12.2 24.4,20.65 44.1,20.65 57.25,0.94 126.69,-67.57 130.44,-135.14 3.76,-74.13 -65.69,-76.01 -78.82,-76.01 -98.54,0 -177.37,126.69 -181.12,228.98 -1.88,69.44 25.34,126.68 122,126.68 69.44,0 122.93,-51.61 174.54,-152.02 21.58,-42.23 3.75,-39.41 -1.88,-39.41zm-105.1 -123.88c12.2,0 15.02,7.51 15.02,19.71 -2.82,37.54 -43.17,107.92 -88.22,107.92 -11.26,0 -15.95,-3.75 -23.46,-15.02 17.83,-55.36 61,-112.61 96.66,-112.61zm812.58 130.57c-9.86,21.87 -43.43,89.96 -79.67,89.96 -60.06,0 -4.69,-136.07 20.65,-199.88 17.83,-42.23 41.29,-45.04 41.29,-45.04l-3.76 -15.96c-25.33,8.45 -80.7,24.4 -109.79,8.45l-9.39 26.27c-12.2,-17.83 -32.84,-34.72 -68.5,-34.72 -93.12,0 -162.38,114.36 -178.57,213.37 -14.74,23.89 -34.7,47.51 -56.04,47.51 -45.98,0 -25.33,-79.76 0,-146.39 2.82,-6.57 11.26,-31.91 22.52,-64.75 15.02,-40.35 30.97,-79.77 47.86,-113.55 32.85,3.75 62.88,6.57 85.4,6.57 120.12,0 209.27,-51.61 209.27,-122 0,-52.55 -47.86,-82.58 -109.8,-82.58 -105.1,0 -180.17,54.43 -237.42,141.7 -100.41,-28.15 -201.76,-68.5 -274.02,-68.5 -83.52,0 -120.11,46.92 -124.81,99.47l6.57 5.63c46.92,-40.35 219.59,-12.2 365.05,8.45 -19.71,35.66 -36.6,76.01 -53.49,118.24 -3.76,7.51 -6.57,15.01 -8.45,21.58 -23.46,70.38 -44.1,133.26 -50.67,152.03 -28.15,79.76 7.51,135.13 50.67,138.88 0.94,0 1.88,0 2.82,0l0.94 0 0.93 0 0.94 0c52.85,0 89.54,-43.53 118.23,-93.52 1.67,53.34 23.71,93.52 72.27,93.52 46.92,0 81.65,-47.86 108.86,-102.28 -7.51,61.93 25.34,102.28 63.81,102.28 47.62,0 84.12,-35.35 112.34,-78.91l-24.13 75.16 91.03 0 23.46 -85.4c6.57,-17.83 13.14,-38.47 20.64,-60.06l0 1.88c0,0 68.51,-167.98 131.38,-167.98 19.71,0 28.15,16.9 27.22,50.68 -3.76,65.69 -47.86,169.85 -104.17,169.85 -18.77,0 -33.78,-12.2 -33.78,-30.03l-3.76 0c-15.95,6.57 -28.15,36.6 -29.09,61 -0.93,31.91 18.77,62.88 66.63,62.88 99.47,0 174.55,-139.83 183.93,-243.06 6.57,-66.62 -15.95,-112.61 -73.2,-112.61 -55.36,0 -98.53,44.11 -128.56,97.6 35.66,-108.86 70.38,-213.96 75.08,-225.22 17.83,-42.23 39.41,-44.11 39.41,-44.11l-3.75 -15.95c-24.4,8.45 -86.34,23.46 -115.43,8.45l-13.14 14.07 8.45 12.2 -104.26 324.82zm-267.35 88.09c-69.45,0 -0.94,-218.66 76.01,-218.66 19.71,0 34.72,15.96 35.66,38.48l-15.95 48.8c-18.77,47.86 -56.31,131.38 -95.72,131.38zm-9.39 -354.73c-24.4,0 -49.73,-2.81 -76.01,-7.5 41.29,-73.2 90.09,-120.12 152.02,-120.12 35.66,0 53.49,16.89 53.49,45.04 0,52.55 -60.99,82.58 -129.5,82.58z"></path><path d="M1793.82 349.33l-123.95 36.79 1.47 4.95 10.72 5.81 60.81 204.92 -5.81 10.72 1.47 4.95 123.95 -36.78 25.56 -47.14 -47.08 -158.65 -47.14 -25.57zm-49.07 64.91l36.69 -10.89 12.43 6.74 35.51 119.65 -6.75 12.43 -36.69 10.88 -41.19 -138.81zm334.85 -125.25l-71.16 13.32 0.95 5.08 10.06 6.89 31.13 166.39 -7.99 11.66 -31.18 5.83 -11.66 -7.98 -31.13 -166.39 6.89 -10.06 -0.95 -5.08 -71.17 13.31 0.95 5.08 10.05 6.89 35.51 189.77 40.23 27.55 91.5 -17.12 27.54 -40.23 -35.5 -189.77 6.88 -10.06 -0.95 -5.08zm251.98 203.81l-27.75 -74.91 25.31 -29.68 -7.1 -89.36 -37.1 -31.63 -132.31 10.51 0.41 5.16 9.27 7.91 16.93 213.08 -7.91 9.27 0.41 5.16 72.18 -5.74 -0.41 -5.15 -9.28 -7.91 -5.46 -68.74 18.9 -1.5 25.08 67.52 -4.15 8.63 0.41 5.16 70.44 -5.6 -0.4 -5.16 -7.47 -7.02zm-111.55 -172.01l38.15 -3.03 10.76 9.17 3.33 41.93 -9.18 10.76 -38.15 3.03 -4.91 -61.86zm311.15 56.04l24.84 -25.15 -1.64 -60.32 -35.39 -33.53 -129.24 3.5 0.14 5.17 8.85 8.38 5.78 213.68 -8.38 8.85 0.14 5.16 132.68 -3.59 33.54 -35.4 -1.64 -60.3 -29.68 -26.45zm-76.37 -68.98l34.81 -0.94 10.27 9.72 0.72 26.54 -9.73 10.27 -34.81 0.94 -1.26 -46.53zm51.9 133.45l-9.72 10.26 -38.26 1.04 -1.44 -53.41 38.25 -1.04 10.27 9.72 0.9 33.43zm285.41 63.12l-30.75 -231.39 -84.2 -6.68 -0.41 5.15 5.7 6.68 -63.55 212.49 -8.53 7.28 -0.41 5.15 68.73 5.46 0.41 -5.15 -6.01 -7.05 7.36 -27.44 54.3 4.31 2.94 28.26 -7.04 6.01 -0.41 5.15 68.74 5.46 0.41 -5.16 -7.28 -8.53zm-97.95 -86.28l24.19 -91.11 1.37 0.11 9.5 93.78 -35.06 -2.78zm365.48 -92.77l0.95 -5.08 -71.17 -13.31 -0.95 5.08 6.89 10.06 -19.72 105.39 -31.96 -129.1 -55.92 -10.46 -0.95 5.08 6.89 10.06 -39.32 210.1 -10.06 6.89 -0.95 5.08 71.16 13.32 0.96 -5.08 -6.89 -10.06 19.66 -105.06 32.02 128.76 55.92 10.46 0.95 -5.08 -6.89 -10.06 39.32 -210.1 10.06 -6.89zm203.09 48.88l-123.97 -36.69 -1.47 4.95 5.82 10.72 -60.65 204.96 -10.72 5.82 -1.46 4.96 123.97 36.69 47.12 -25.6 46.96 -158.69 -25.6 -47.12zm-76.51 27.68l36.7 10.86 6.75 12.43 -35.42 119.68 -12.42 6.74 -36.7 -10.86 41.09 -138.85z"></path></g></svg>
+      <div>
+        <h1>SVG2<em>Klischee</em></h1>
+        <p class="lead">SVG laden, Masse einstellen, STL drucken. Ergibt ein Klischee für den Heidelberger Tiegel: Träger mit erhabenem, gespiegeltem Relief.</p>
+      </div>
+    </header>
 
-  <h1>SVG2Klischee <span>Web</span></h1>
-
-  <!-- SVG Upload -->
-  <div>
-    <div class="section-title">SVG-Datei</div>
-    <div id="drop-zone" title="SVG-Datei auswählen oder hierher ziehen">
-      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-        <polyline points="17 8 12 3 7 8"/>
-        <line x1="12" y1="3" x2="12" y2="15"/>
-      </svg>
-      SVG auswählen oder ablegen
-      <div id="file-name">Keine Datei ausgewählt</div>
+    <div class="drop" id="drop-zone" tabindex="0" role="button" aria-label="SVG-Datei auswählen oder hierher ziehen">
+      <strong>SVG ablegen</strong>
+      <span class="hint">oder klicken zum Auswählen</span>
+      <span class="file-name" id="file-name">Keine Datei ausgewählt</span>
     </div>
-    <input type="file" id="file-input" accept=".svg,image/svg+xml">
-  </div>
+    <input type="file" id="file-input" accept=".svg,image/svg+xml" hidden>
 
-  <!-- Plattenparameter -->
-  <div>
-    <div class="section-title">Druckplatte</div>
-    <div class="field">
-      <label>Träger (Dicke) <span>mm</span></label>
-      <input type="number" id="plate-thick"  value="0.25" min="0.1" max="5" step="0.05">
+    <div id="status" class="msg" aria-live="polite">Bitte SVG-Datei auswählen.</div>
+
+    <fieldset>
+      <legend>Druckplatte</legend>
+      <div class="row"><label for="plate-thick">Träger (Dicke)<small>mm</small></label><input type="number" id="plate-thick" value="0.25" min="0.1" max="5" step="0.05"></div>
+      <div class="row"><label for="margin">Rand um Motiv<small>mm</small></label><input type="number" id="margin" value="5" min="0" max="30" step="0.5"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Relief</legend>
+      <div class="row"><label for="relief-depth">Relieftiefe<small>mm</small></label><input type="number" id="relief-depth" value="0.71" min="0.1" max="3" step="0.01"></div>
+      <label class="check"><input type="checkbox" id="use-taper" checked>Konische Basis (Taper)</label>
+      <div class="row" id="row-taper"><label for="taper-amount">Taper-Betrag<small>mm pro Seite</small></label><input type="number" id="taper-amount" value="0.3" min="0.01" max="2" step="0.05"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Optionen</legend>
+      <label class="check"><input type="checkbox" id="mirror-motif" checked>Motiv spiegeln (Druckseite)</label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Ausgabe</legend>
+      <button class="primary" id="btn-generate" disabled>Klischee generieren</button>
+      <button id="btn-download" disabled>STL herunterladen</button>
+    </fieldset>
+
+    <div class="meta foot"><span>Durband Creative Laboratory · Langenthal</span><a href="https://www.durband.ch" target="_blank" rel="noopener">durband.ch</a></div>
+  </aside>
+
+  <main>
+    <div id="canvas-wrap"></div>
+    <div class="meta view-meta"><span>Vorschau — 3D</span><span>Links: drehen · Rad: zoomen · Rechts: verschieben</span></div>
+    <div class="hud">
+      <div class="card legend"><span><i class="sw" style="background:var(--relief)"></i>Relief</span><span><i class="sw" style="background:var(--plate)"></i>Träger</span></div>
+      <div class="card stats" id="plate-size-info">
+        <div><b>Platte</b><span>— × — mm</span></div>
+      </div>
     </div>
-    <div class="field">
-      <label>Rand (Margin) <span>mm</span></label>
-      <input type="number" id="margin"       value="5"   min="0" max="30" step="0.5">
-    </div>
-    <div id="plate-size-info" style="font-size:0.72rem;color:#666;padding:3px 0;">Platte: — × — mm</div>
-  </div>
-
-  <!-- Reliefparameter -->
-  <div>
-    <div class="section-title">Relief</div>
-    <div class="field">
-      <label>Relieftiefe <span>mm</span></label>
-      <input type="number" id="relief-depth" value="0.71" min="0.1" max="3" step="0.01">
-    </div>
-  </div>
-
-    <label class="checkbox-row" style="margin-top:6px">
-      <input type="checkbox" id="use-taper" checked>
-      Konische Basis (Taper)
-    </label>
-    <div class="field" style="margin-top:4px">
-      <label>Taper-Betrag <span>mm</span></label>
-      <input type="number" id="taper-amount" value="0.3" min="0.01" max="2" step="0.05">
-    </div>
-  </div>
-
-  <!-- Optionen -->
-  <div>
-    <div class="section-title">Optionen</div>
-    <label class="checkbox-row">
-      <input type="checkbox" id="mirror-motif" checked>
-      Motiv spiegeln (Druckseite)
-    </label>
-  </div>
-
-  <!-- Aktionen -->
-  <div style="display:flex;flex-direction:column;gap:8px">
-    <button id="btn-generate" disabled>Klischee generieren</button>
-    <button id="btn-download" disabled>STL herunterladen</button>
-  </div>
-
-  <div id="status">Bitte SVG-Datei auswählen.</div>
-
-</aside>
-
-<!-- ── 3D-Canvas ─────────────────────────────────────────────────── -->
-<div id="canvas-wrap">
-  <div id="canvas-hint">
-    Linke Taste: Drehen<br>
-    Mausrad: Zoom<br>
-    Rechte Taste: Verschieben
-  </div>
+  </main>
 </div>
 
 <!-- ── Three.js via importmap ──────────────────────────────────── -->
@@ -281,7 +222,10 @@ const wrap = document.getElementById('canvas-wrap');
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
-renderer.setClearColor(0x111111);
+// Farben aus den DCL-CSS-Variablen, damit Vorschau und Seite dieselbe Palette haben
+const css = getComputedStyle(document.documentElement);
+const cssColor = name => new THREE.Color(css.getPropertyValue(name).trim());
+renderer.setClearColor(cssColor('--view'));
 renderer.shadowMap.enabled = true;
 wrap.appendChild(renderer.domElement);
 
@@ -293,7 +237,7 @@ dirLight.position.set(60, 80, 100);
 dirLight.castShadow = true;
 scene.add(dirLight);
 
-const fillLight = new THREE.DirectionalLight(0x8090ff, 0.3);
+const fillLight = new THREE.DirectionalLight(0xffffff, 0.4);
 fillLight.position.set(-40, -60, 30);
 scene.add(fillLight);
 
@@ -306,7 +250,7 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 
 // Grid (XY-Ebene, passt zu Z=up)
-const grid = new THREE.GridHelper(300, 30, 0x2a2a2a, 0x222222);
+const grid = new THREE.GridHelper(300, 30, cssColor('--linie'), cssColor('--linie'));
 grid.rotation.x = Math.PI / 2;
 scene.add(grid);
 
@@ -331,10 +275,10 @@ window.addEventListener('resize', resize);
 const PX_TO_MM = 25.4 / 96.0;   // SVG-px → mm (96 dpi Standard)
 
 const matPlate = new THREE.MeshStandardMaterial({
-  color: 0x8898a8, roughness: 0.65, metalness: 0.45,
+  color: cssColor('--plate'), roughness: 0.6, metalness: 0.05,
 });
 const matRelief = new THREE.MeshStandardMaterial({
-  color: 0xd4aa30, roughness: 0.38, metalness: 0.35,
+  color: cssColor('--relief'), roughness: 0.55, metalness: 0.05,
 });
 
 // ═══════════════════════════════════════════════════════════════════
@@ -354,7 +298,7 @@ let loadedFileName = 'klischee';
 
 function setStatus(msg, type = '') {
   statusEl.textContent = msg;
-  statusEl.className   = type;
+  statusEl.className   = ('msg ' + type).trim();
 }
 
 // ── Datei laden ──────────────────────────────────────────────────────
@@ -371,12 +315,24 @@ function loadFile(file) {
     fileNameEl.textContent = file.name;
     dropZone.classList.add('has-file');
     btnGenerate.disabled = false;
-    setStatus(`"${file.name}" geladen. Jetzt "Klischee generieren" klicken.`);
+    setStatus(`«${file.name}» geladen. Jetzt «Klischee generieren» klicken.`);
   };
   reader.readAsText(file);
 }
 
 dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+});
+// Taper-Betrag nur relevant, wenn Taper aktiv
+const useTaperEl = document.getElementById('use-taper');
+const taperRow   = document.getElementById('row-taper');
+function syncTaper() {
+  taperRow.classList.toggle('off', !useTaperEl.checked);
+  document.getElementById('taper-amount').disabled = !useTaperEl.checked;
+}
+useTaperEl.addEventListener('change', syncTaper);
+syncTaper();
 fileInput.addEventListener('change', e => loadFile(e.target.files[0]));
 dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
 dropZone.addEventListener('dragleave', ()  => dropZone.classList.remove('drag-over'));
@@ -566,8 +522,11 @@ function buildKlischee() {
   console.log('Plate center:', realCX.toFixed(3), realCY.toFixed(3));
   console.log('Plate size:  ', plateW.toFixed(3), '×', plateH.toFixed(3));
 
-  document.getElementById('plate-size-info').textContent =
-    `Platte: ${plateW.toFixed(1)} × ${plateH.toFixed(1)} mm`;
+  document.getElementById('plate-size-info').innerHTML =
+    `<div><b>Platte</b><span>${plateW.toFixed(1)} × ${plateH.toFixed(1)} mm</span></div>` +
+    `<div><b>Träger</b><span>${p.plateT.toFixed(2)} mm</span></div>` +
+    `<div><b>Relief</b><span>${p.reliefD.toFixed(2)} mm</span></div>` +
+    `<div><b>Gesamt</b><span>${(p.plateT + p.reliefD).toFixed(2)} mm</span></div>`;
 
   // ── 5c. Grundplatte passend zur echten Geometrie ───────────────────
   const plateGeo  = new THREE.BoxGeometry(plateW, plateH, p.plateT);
