@@ -102,6 +102,8 @@ button.primary:disabled:hover { background: var(--anthrazit); }
 .msg.error::before { content: "FEHLER"; }
 .msg.ok { background: var(--gruen-hell); }
 .msg.ok::before { content: "ERLEDIGT"; }
+.msg.warn { background: var(--gelb-hell); }
+.msg.warn::before { content: "ERLEDIGT – MIT HINWEIS"; }
 
 main { position: relative; min-width: 0; background: var(--view); }
 #canvas-wrap { position: absolute; inset: 0; }
@@ -366,10 +368,14 @@ btnGenerate.addEventListener('click', () => {
   setTimeout(() => {
     try {
       buildKlischee();
-      setStatus('Klischee erstellt — STL-Download bereit.', 'ok');
+      if (taperWarnings.length)
+        setStatus('Klischee erstellt — STL-Download bereit.\n' + [...new Set(taperWarnings)].join('\n'), 'warn');
+      else
+        setStatus('Klischee erstellt — STL-Download bereit.', 'ok');
       btnDownload.disabled = false;
     } catch (err) {
       setStatus('Fehler: ' + err.message, 'error');
+      document.getElementById('plate-size-info').innerHTML = '<div><b>Platte</b><span>— × — mm</span></div>';
       console.error(err);
     } finally {
       btnGenerate.disabled = false;
@@ -382,6 +388,7 @@ btnGenerate.addEventListener('click', () => {
 // ═══════════════════════════════════════════════════════════════════
 function buildKlischee() {
   const p = getParams();
+  taperWarnings.length = 0;
 
   // ── 1. SVG parsen ─────────────────────────────────────────────────
   const loader = new SVGLoader();
@@ -507,6 +514,9 @@ function buildKlischee() {
       if (y > rMaxY) rMaxY = y;
     }
   }
+  if (!(rMaxX > rMinX && rMaxY > rMinY)) {
+    throw new Error('Das Motiv enthält keine druckbaren Flächen (alle Formen schmaler als 5 µm).');
+  }
   const realW  = rMaxX - rMinX;
   const realH  = rMaxY - rMinY;
   const realCX = (rMinX + rMaxX) / 2;
@@ -611,33 +621,459 @@ function svgMmPerUnit(svgXml, svgW_px) {
 // ═══════════════════════════════════════════════════════════════════
 // Taper: konisches Prisma direkt aus Konturpunkten
 // ═══════════════════════════════════════════════════════════════════
-/**
- * Verschiebt jeden Konturpunkt entlang der gemittelten Außennormale.
- * Wicklungsrichtung wird aus dem Vorzeichenflächeninhalt (Shoelace) bestimmt.
- *   offset > 0 → nach außen (von Innenraum weg)
- *   offset < 0 → nach innen
- */
-function offsetContour(pts, offset) {
-  const n = pts.length;
-  let area = 0;
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    area += pts[i].x * pts[j].y - pts[j].x * pts[i].y;
-  }
-  // area ≥ 0 → CCW → außen = rechts von Bewegungsrichtung = (dy, -dx)
-  const sign = area >= 0 ? 1 : -1;
+// Hinweise aus offsetContour (Rampe in engem Spalt, Taper verkleinert) –
+// buildKlischee leert die Liste, der Generieren-Button zeigt sie im Status an.
+const taperWarnings = [];
 
-  return pts.map((curr, i) => {
-    const prev = pts[(i - 1 + n) % n];
-    const next = pts[(i + 1) % n];
-    const dx0 = curr.x - prev.x, dy0 = curr.y - prev.y;
-    const dx1 = next.x - curr.x, dy1 = next.y - curr.y;
-    let nx = sign * (dy0 + dy1);
-    let ny = sign * -(dx0 + dx1);
-    const len = Math.sqrt(nx * nx + ny * ny);
-    if (len > 1e-10) { nx /= len; ny /= len; }
-    return new THREE.Vector2(curr.x + nx * offset, curr.y + ny * offset);
-  });
+/**
+ * Bereinigt eine Kontur, bevor Druckfläche UND Basis daraus gebaut werden
+ * (beide nutzen dieselben Punkte, sonst entstehen an entfernten Punkten
+ * umgeklappte Mikro-Wände): Folgepunkte näher als MERGE (5 µm, weit unter der
+ * Druckauflösung) zum zuletzt behaltenen Punkt fallen weg. Ein Rundungsfehler am
+ * Schlusspunkt bildet sonst eine winzige Schlaufe, die sich schon in der
+ * Druckfläche kreuzt – das könnte offsetContour nie beheben.
+ * Weil immer gegen den zuletzt BEHALTENEN Punkt geprüft wird, weicht die Kontur
+ * höchstens MERGE·√2 (≈ 7 µm) von der Eingabe ab, am Konturende (Schlusspunkt)
+ * im ungünstigsten Fall doppelt so viel – nie sichtbar.
+ */
+function cleanContour(pts) {
+  const MERGE = 5e-3;                                       // mm
+  const close = (a, b) => Math.abs(a.x - b.x) < MERGE && Math.abs(a.y - b.y) < MERGE;
+  const P = [];
+  for (const p of pts) if (!P.length || !close(p, P[P.length - 1])) P.push(p);
+  while (P.length > 1 && close(P[P.length - 1], P[0])) P.pop();
+  return P.map(p => new THREE.Vector2(p.x, p.y));
+}
+
+/**
+ * Basis-Kontur (z=0) für den Taper.
+ *
+ * Jede Kante der Druckfläche wird um genau |offset| senkrecht verschoben,
+ * damit jede Seitenwand denselben Anzug hat und eben ist. Die Ecken liegen
+ * auf dem Schnittpunkt der beiden verschobenen Nachbarkanten (Gehrung,
+ * Länge |offset| / cos(halber Knickwinkel)).
+ *
+ * Rückgabe: genau pts.length Punkte, base[i] gehört zu pts[i] (1:1), damit
+ * addWalls() unverändert top[i]→base[i] verbinden kann.
+ *   offset > 0 → weg vom eigenen Innenraum (Aussenkontur wächst)
+ *   offset < 0 → in den eigenen Innenraum (Loch schrumpft)
+ *
+ * Enge Stellen (Spalt schmaler als 2·|offset|, z. B. die Kerbe im V):
+ * Physikalisch treffen sich die beiden Wände in einer Talsohle auf Höhe
+ * reliefD·(1 − Spalt/(2·|offset|)); darunter ist der Spalt voll Material,
+ * die Basis ist dort geschlossen. Deshalb wird die Verschiebung als
+ * Wellenfront gerechnet (gerades Skelett): schrumpft eine verschobene Kante
+ * auf Länge 0, verschmelzen ihre Endpunkte und laufen als ein Punkt weiter.
+ * Alle Punkte eines zugelaufenen Spalts enden so im Schliesspunkt der Basis,
+ * ihre Wände werden ein Dreiecksfächer dorthin. Ergebnis: die Basis kreuzt
+ * sich nicht und keine Wand kippt nach innen.
+ * Stossen zwei nicht benachbarte Teile der Kontur zusammen (Spalt an beiden
+ * Enden offen) oder läuft ein parallelwandiger Schlitz zu, bleiben die
+ * beteiligten Punkte kurz vor der Berührung stehen: dort wird die Wand
+ * steiler (Spaltboden bei z ≈ 0), statt sich zu durchdringen.
+ * Läuft eine ganze Kontur zu (Loch schmaler als 2·|offset|), hält sie kurz
+ * vor dem Zusammenlaufen an (hauchdünnes Rest-Loch an der Basis).
+ * Grenze: Ein langer, nur FAST paralleler Spalt (Wände wenige Grad schräg)
+ * läuft als Fächer zu; dessen Boden steigt zum engen Ende hin fast auf
+ * Druckhöhe an (wird in taperWarnings gemeldet).
+ *
+ * opts.miterLimit  max. Gehrungslänge an spitzen Aussenecken als Vielfaches
+ *                  von |offset| (Standard 4 wie SVG stroke-miterlimit).
+ *                  Spitzere Ecken bekommen dort etwas weniger Anzug.
+ */
+function offsetContour(pts, offset, opts = {}) {
+  const n = pts.length;
+  const d = Math.abs(offset);
+  const copy = () => pts.map(p => new THREE.Vector2(p.x, p.y));
+  if (n < 3 || !(d > 0)) return copy();
+
+  const miterLimit = opts.miterLimit ?? 4;
+  const EPS  = 1e-9;        // mm: Punkte gelten als gleich
+  const BACK = 0.02 * d;    // so viel früher anhalten als die Berührung (Zeit = mm Versatz)
+  const GMIN = 0.05 * d;    // Mindestanzug einer Fächerwand beim Anhalten
+
+  // ── 1. Doppelte Folgepunkte zusammenfassen (z. B. Schlusspunkt == Startpunkt beim O)
+  //    Gleiche Punkte bekommen so auch exakt denselben Basispunkt.
+  //    (Mikro-Punkte und Nadeln hat cleanContour schon aus der Kontur genommen.)
+  const U   = [];               // eindeutige Punkte
+  const uOf = new Array(n);     // pts-Index → U-Index
+  const same = (a, b) => Math.abs(a.x - b.x) < EPS && Math.abs(a.y - b.y) < EPS;
+  for (let i = 0; i < n; i++) {
+    if (U.length && same(pts[i], U[U.length - 1])) { uOf[i] = U.length - 1; continue; }
+    U.push({ x: pts[i].x, y: pts[i].y });
+    uOf[i] = U.length - 1;
+  }
+  while (U.length > 1 && same(U[U.length - 1], U[0])) {
+    const last = U.length - 1;
+    for (let i = 0; i < n; i++) if (uOf[i] === last) uOf[i] = 0;
+    U.pop();
+  }
+  const m = U.length;
+  if (m < 3) return copy();
+
+  // ── 2. Umlaufsinn, Kantenrichtungen, freie Seite ─────────────────────
+  let area = 0;
+  for (let k = 0; k < m; k++) {
+    const a = U[k], b = U[(k + 1) % m];
+    area += a.x * b.y - b.x * a.y;
+  }
+  if (Math.abs(area) < EPS) return copy();
+  // CCW (area > 0): aussen = rechts der Laufrichtung = (dy, −dx); offset < 0 dreht um
+  const side = (area > 0 ? 1 : -1) * (offset > 0 ? 1 : -1);
+
+  const ex = new Float64Array(m), ey = new Float64Array(m);   // Kantenrichtung, Länge 1
+  const nx = new Float64Array(m), ny = new Float64Array(m);   // Normale zur freien Seite, Länge 1
+  for (let k = 0; k < m; k++) {
+    const a = U[k], b = U[(k + 1) % m];
+    const L = Math.hypot(b.x - a.x, b.y - a.y);
+    ex[k] = (b.x - a.x) / L;  ey[k] = (b.y - a.y) / L;
+    nx[k] = side * ey[k];     ny[k] = -side * ex[k];
+  }
+  // Knickwinkel je Punkt, > 0 = Ecke springt in Laufrichtung der Front vor (Spitze),
+  // < 0 = Innenecke der Front (Kerbe, läuft schnell zu)
+  const turn = new Float64Array(m);
+  for (let k = 0; k < m; k++) {
+    const i = (k - 1 + m) % m;
+    turn[k] = side * Math.atan2(ex[i] * ey[k] - ey[i] * ex[k], ex[i] * ex[k] + ey[i] * ey[k]);
+  }
+
+  // ── 3. Wellenfront bis Zeit T (= Versatz in mm) ──────────────────────
+  //    Jede Kante wandert mit Geschwindigkeit 1 parallel zur freien Seite,
+  //    jeder Knoten mit dem Gehrungsvektor seiner beiden Nachbarkanten.
+  //    Ereignisse (Kante schrumpft auf 0, Knoten hält an) laufen über eine
+  //    Prioritätswarteschlange; nach einem Ereignis ändert sich nur der eine
+  //    Knoten, neu geplant werden nur seine beiden Kanten.
+  //    freezeAt[k]: ab dieser Zeit steht der Knoten still (Kollisionsschutz).
+  //    absd[k]: Kanten, die in Knoten k zugelaufen sind – ihre Wand ist ein Fächer
+  //    zum Endpunkt von k, der darf deshalb nie hinter diese Kanten wandern.
+  function simulate(T, freezeAt) {
+    // Knoten k: Position (px,py) zur Zeit tp, Geschwindigkeit (vx,vy)
+    const px = U.map(p => p.x), py = U.map(p => p.y), tp = new Float64Array(m);
+    const vx = new Float64Array(m), vy = new Float64Array(m);
+    const prev = [], next = [], eIn = [], eOut = [], parent = [], absd = U.map(() => []);
+    const tn = Array.from(turn), frz = Array.from(freezeAt), ver = new Int32Array(m);
+    const alive = new Uint8Array(m).fill(1);
+    for (let k = 0; k < m; k++) {
+      prev[k] = (k - 1 + m) % m; next[k] = (k + 1) % m;
+      eIn[k] = prev[k]; eOut[k] = k; parent[k] = k;
+    }
+    let count = m, t = 0;
+    const X = (k, s) => px[k] + vx[k] * (s - tp[k]);
+    const Y = (k, s) => py[k] + vy[k] * (s - tp[k]);
+
+    // Binärer Heap: [Zeit, Typ, Knoten, Version Knoten, Nachbar, Version Nachbar];
+    // bei gleicher Zeit zuerst Verschmelzen (Typ 0), dann Anhalten (Typ 1/2)
+    const heap = [];
+    const before = (a, b) => a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]);
+    function push(e) {
+      heap.push(e);
+      for (let i = heap.length - 1; i > 0;) {
+        const p = (i - 1) >> 1;
+        if (!before(heap[i], heap[p])) break;
+        [heap[p], heap[i]] = [heap[i], heap[p]]; i = p;
+      }
+    }
+    function pop() {
+      const top = heap[0], last = heap.pop();
+      if (heap.length) {
+        heap[0] = last;
+        for (let i = 0; ;) {
+          const l = 2 * i + 1, r = l + 1;
+          let s = i;
+          if (l < heap.length && before(heap[l], heap[s])) s = l;
+          if (r < heap.length && before(heap[r], heap[s])) s = r;
+          if (s === i) break;
+          [heap[s], heap[i]] = [heap[i], heap[s]]; i = s;
+        }
+      }
+      return top;
+    }
+
+    // Geschwindigkeit ab Zeit t neu setzen (Position bis t fortschreiben)
+    function setVelocity(k) {
+      px[k] = X(k, t); py[k] = Y(k, t); tp[k] = t; ver[k]++;
+      if (t >= frz[k]) { vx[k] = 0; vy[k] = 0; return; }
+      const a = eIn[k], b = eOut[k];
+      const c = 1 + nx[a] * nx[b] + ny[a] * ny[b];
+      let ux, uy;
+      if (c > 1e-12) { ux = (nx[a] + nx[b]) / c; uy = (ny[a] + ny[b]) / c; }   // exakte Gehrung
+      else if (tn[k] > 0) { ux = ex[a]; uy = ey[a]; }     // Haarnadel-Spitze: geradeaus
+      else { vx[k] = 0; vy[k] = 0; return; }              // zugelaufener Schlitz: Knoten steht
+      const len = Math.hypot(ux, uy);
+      if (tn[k] > 0 && (c <= 1e-12 || len > miterLimit)) { ux *= miterLimit / len; uy *= miterLimit / len; }
+      vx[k] = ux; vy[k] = uy;
+    }
+    // Kante a→b: wann schrumpft sie auf Länge 0?
+    function scheduleEdge(a, b) {
+      const e = eOut[a];
+      const L    = (X(b, t) - X(a, t)) * ex[e] + (Y(b, t) - Y(a, t)) * ey[e];
+      const rate = (vx[a] - vx[b]) * ex[e] + (vy[a] - vy[b]) * ey[e];
+      // schon auf 0 geschrumpft oder umgedreht → sofort verschmelzen
+      if (L <= 1e-9) push([t, 0, a, ver[a], b, ver[b]]);
+      else if (rate > 1e-12) push([t + L / rate, 0, a, ver[a], b, ver[b]]);
+    }
+    // Knoten k: wann friert er ein bzw. muss er anhalten?
+    function scheduleNode(k) {
+      if (frz[k] > t && frz[k] < Infinity) push([frz[k], 1, k, ver[k], -1, 0]);
+      // Anhalten, bevor der Knoten hinter eine in ihm zugelaufene Kante wandert
+      let tv = Infinity;
+      for (const c of absd[k]) {
+        const r = vx[k] * nx[c] + vy[k] * ny[c];
+        if (r >= -1e-12) continue;
+        const g = (px[k] - U[c].x) * nx[c] + (py[k] - U[c].y) * ny[c];
+        tv = Math.min(tv, t + Math.max(0, (g - GMIN) / -r));
+      }
+      if (tv < Infinity) push([tv, 2, k, ver[k], -1, 0]);
+    }
+    // Knoten j (= next[k]) in k aufnehmen, Position (qx,qy) zur Zeit t
+    function merge(k, j, qx, qy) {
+      absd[k].push(eOut[k]);
+      for (const c of absd[j]) absd[k].push(c);
+      eOut[k] = eOut[j];  next[k] = next[j];  prev[next[j]] = k;
+      tn[k] += tn[j];  frz[k] = Math.min(frz[k], frz[j]);
+      alive[j] = 0;  parent[j] = k;  ver[j]++;  count--;
+      px[k] = qx; py[k] = qy; tp[k] = t; vx[k] = 0; vy[k] = 0;
+      return k;
+    }
+    // Knoten k nach einer Änderung neu planen.
+    // Ein parallelwandiger Schlitz wird nicht zugezogen (sonst Fächer als Rampe bis
+    // fast Druckhöhe): Der Knoten steht (setVelocity), die Schlitzwände hält
+    // Abschnitt 5 vor der Berührung an.
+    function settle(k) {
+      setVelocity(k);
+      scheduleEdge(prev[k], k); scheduleEdge(k, next[k]); scheduleNode(k);
+    }
+
+    for (let k = 0; k < m; k++) setVelocity(k);
+    for (let k = 0; k < m; k++) if (alive[k]) { scheduleEdge(k, next[k]); scheduleNode(k); }
+
+    while (heap.length && count > 2) {
+      const [te, type, k, vk, j, vj] = pop();
+      if (te > T) break;
+      if (!alive[k] || ver[k] !== vk) continue;                       // veraltet
+      if (type === 0 && (!alive[j] || ver[j] !== vj || next[k] !== j)) continue;
+      t = Math.max(t, te);
+      if (type === 0) {
+        // Kante k→j ist zugelaufen: beide Endpunkte verschmelzen
+        // (ein stehender Knoten bleibt, wo er ist – sonst würde er zurückgeschoben)
+        let qx = (X(k, t) + X(j, t)) / 2, qy = (Y(k, t) + Y(j, t)) / 2;
+        if (vx[k] === 0 && vy[k] === 0) { qx = X(k, t); qy = Y(k, t); }
+        else if (vx[j] === 0 && vy[j] === 0) { qx = X(j, t); qy = Y(j, t); }
+        settle(merge(k, j, qx, qy));
+      } else {
+        if (type === 2) frz[k] = t;                                    // Anhalten
+        settle(k);
+      }
+    }
+    const tEnd = count > 2 ? T : t;
+    if (count <= 2) {
+      // Kontur ganz zugelaufen → ein Punkt (nur noch Rückfall: der Aufrufer rechnet
+      // in diesem Fall mit kleinerem Versatz neu, siehe Abschnitt 5)
+      const ids = [];
+      for (let k = 0; k < m; k++) if (alive[k]) ids.push(k);
+      const qx = ids.reduce((s, k) => s + X(k, t), 0) / ids.length;
+      const qy = ids.reduce((s, k) => s + Y(k, t), 0) / ids.length;
+      for (const k of ids) { px[k] = qx; py[k] = qy; vx[k] = 0; vy[k] = 0; tp[k] = t; parent[k] = ids[0]; }
+      parent[ids[0]] = ids[0];
+    }
+    const find = k => { while (parent[k] !== k) k = parent[k]; return k; };
+    const P = U.map((_, k) => { const r = find(k); return { x: X(r, tEnd), y: Y(r, tEnd) }; });
+    P.stop = U.map((_, k) => Math.min(tEnd, frz[find(k)]));   // Zeitpunkt, ab dem der Punkt stand
+    P.vanished = count <= 2; P.tVanish = t;                  // Kontur ganz zugelaufen?
+    return P;
+  }
+
+  // ── 4. Kreuzungstest (Sweep über x, nur echte Kreuzungen / Überlappungen) ──
+  function segCross(a, b, c, e) {
+    const rx = b.x - a.x, ry = b.y - a.y, sx = e.x - c.x, sy = e.y - c.y;
+    const qx = c.x - a.x, qy = c.y - a.y;
+    const rr = Math.hypot(rx, ry), ss = Math.hypot(sx, sy);
+    const den = rx * sy - ry * sx;
+    if (Math.abs(den) <= 1e-12 * rr * ss) {
+      if (Math.abs(qx * ry - qy * rx) > EPS * rr) return false;        // parallel, nicht kollinear
+      const t0 = (qx * rx + qy * ry) / (rr * rr);
+      const t1 = t0 + (sx * rx + sy * ry) / (rr * rr);
+      return (Math.min(1, Math.max(t0, t1)) - Math.max(0, Math.min(t0, t1))) * rr > EPS;
+    }
+    const t = (qx * sy - qy * sx) / den, u = (qx * ry - qy * rx) / den;
+    return t > 1e-9 && t < 1 - 1e-9 && u > 1e-9 && u < 1 - 1e-9;
+  }
+  function crossings(P, firstOnly) {
+    const k = P.length, segs = [], out = [];
+    for (let i = 0; i < k; i++) {
+      const a = P[i], b = P[(i + 1) % k];
+      if (same(a, b)) continue;
+      segs.push({ i, a, b,
+        x0: Math.min(a.x, b.x), x1: Math.max(a.x, b.x),
+        y0: Math.min(a.y, b.y), y1: Math.max(a.y, b.y) });
+    }
+    // Sweep entlang der Achse mit der kleineren Gesamtausdehnung, sonst wird der Test
+    // bei langen, in x überlappenden Kanten quadratisch (nur die Boxen werden getauscht)
+    let sx = 0, sy = 0;
+    for (const g of segs) { sx += g.x1 - g.x0; sy += g.y1 - g.y0; }
+    if (sy < sx) for (const g of segs) { [g.x0, g.y0] = [g.y0, g.x0]; [g.x1, g.y1] = [g.y1, g.x1]; }
+    segs.sort((s, u) => s.x0 - u.x0);
+    for (let s = 0; s < segs.length; s++) {
+      const A = segs[s];
+      for (let u = s + 1; u < segs.length && segs[u].x0 <= A.x1 + EPS; u++) {
+        const B = segs[u];
+        if (B.y0 > A.y1 + EPS || B.y1 < A.y0 - EPS) continue;
+        if (segCross(A.a, A.b, B.a, B.b)) {
+          out.push([A.i, B.i]);
+          if (firstOnly) return out;
+        }
+      }
+    }
+    return out;
+  }
+
+  // ── 5. Kollisionen nicht benachbarter Teile: Beteiligte vor der Berührung anhalten
+  const freezeAt = new Float64Array(m).fill(Infinity);
+  // Kreuzungen, die schon die Druckfläche hat (Schlaufe, Steg ohne Breite), behebt kein
+  // Anhalten – sie zählen hier nicht, sonst würden ihre Nachbarn grossflächig senkrecht.
+  const pairKey = ([i, k]) => Math.min(i, k) * m + Math.max(i, k);
+  const cross0 = new Set(crossings(U, false).map(pairKey));
+  const newCrossings = (P, firstOnly) => {
+    if (!cross0.size) return crossings(P, firstOnly);
+    const r = crossings(P, false).filter(c => !cross0.has(pairKey(c)));
+    return firstOnly ? r.slice(0, 1) : r;
+  };
+  // Läuft die Kontur vor |offset| ganz zu (Loch schmaler als 2·|offset|), kurz vorher
+  // anhalten: hauchdünnes Rest-Loch, Wände etwas steiler, Boden bei z ≈ 0 (statt alles
+  // auf den Schwerpunkt zu ziehen – das gäbe beim Langloch flache Rampen an den Enden).
+  // Umlaufsinn umgekehrt (oder Fläche 0)? = Kontur ist durch sich hindurchgelaufen
+  const flipped = P => {
+    let s = 0;
+    for (let k = 0; k < m; k++) { const a = P[k], b = P[(k + 1) % m]; s += a.x * b.y - b.x * a.y; }
+    return s * area <= 0;
+  };
+  let D = d;
+  let B = simulate(D, freezeAt);
+  // Schmales Loch mit Zwischenpunkten auf den Längsseiten: Es verschwindet keine Kante,
+  // die Längsseiten laufen durcheinander durch, die Basis bleibt kreuzungsfrei, aber
+  // gespiegelt. Wie beim Zulaufen behandeln: Zeitpunkt per Bisektion, kurz davor anhalten.
+  if (!B.vanished && flipped(B)) {
+    let lo = 0, hi = D;
+    for (let s = 0; s < 30; s++) {
+      const mid = (lo + hi) / 2, Bm = simulate(mid, freezeAt);
+      if (Bm.vanished || flipped(Bm)) hi = mid; else lo = mid;
+    }
+    B = { vanished: true, tVanish: hi };
+  }
+  if (B.vanished) { D = Math.max(0, B.tVanish - BACK); B = simulate(D, freezeAt); }
+  // Erste Berührung per Bisektion suchen, die Beteiligten kurz davor anhalten
+  function bisectRound() {
+    let lo = 0, hi = D;
+    for (let s = 0; s < 14; s++) {
+      const mid = (lo + hi) / 2;
+      if (newCrossings(simulate(mid, freezeAt), true).length) hi = mid; else lo = mid;
+    }
+    const tStop = Math.max(0, lo - BACK);
+    for (const [i, k] of newCrossings(simulate(hi, freezeAt), false))
+      for (const v of [i, i + 1, k, k + 1]) freezeAt[v % m] = Math.min(freezeAt[v % m], tStop);
+    B = simulate(D, freezeAt);
+  }
+  let iter = 0;
+  for (; iter < 20 && newCrossings(B, true).length; iter++) bisectRound();
+  // Viele Berührungen (dicht abgetastete Kurven, Schreibschrift) – Bisektion je Berührung
+  // wäre dort sekundenlang: Rückfall auf einen groben Vorlauf in 32 Zeitschritten. Eine
+  // Kreuzung, die im Schritt s neu auftaucht, friert ihre Knoten auf t(s−1) − BACK ein;
+  // bleibt danach noch eine, wird das Fenster um die beteiligten Kanten verdoppelt
+  // (±1, ±3, ±7 …). Gewöhnliche Buchstaben kommen fast immer mit den ersten 20 Runden
+  // Bisektion aus und bleiben davon unberührt (der Vorlauf hält Punkte früher an als nötig).
+  if (newCrossings(B, true).length) {
+    for (let s = 1; s <= 32; s++) {
+      const ts = D * s / 32, tStop = Math.max(0, D * (s - 1) / 32 - BACK);
+      for (let rep = 0, w = 0; rep < 8; rep++, w = 2 * w + 1) {
+        let changed = false;
+        for (const [i, k] of newCrossings(simulate(ts, freezeAt), false))
+          for (const c of [i, k]) for (let v = c - w; v <= c + 1 + w; v++) {
+            const q = ((v % m) + m) % m;
+            if (freezeAt[q] > tStop) { freezeAt[q] = tStop; changed = true; }
+          }
+        if (!changed) break;
+      }
+    }
+    B = simulate(D, freezeAt);
+  }
+  for (; iter < 32 && newCrossings(B, true).length; iter++) bisectRound();
+
+  // ── 6. Endkontrolle am fertigen Netz, lokale Korrektur ────────────────
+  //    Wände: Basispunkte auf der freien Seite, Basiskante nicht umgedreht.
+  //    Schnitte: das Wandnetz ist zwischen top und base linear, ein Schnitt auf
+  //    Höhe λ hat die Punkte lerp(top[i], base[i]) und lerp(top[i+1], base[i])
+  //    (Diagonale b0–t1 aus addWalls) – er darf sich nirgends kreuzen.
+  //    Liefert die Punkte, deren Wände ein Problem haben.
+  function problems(Bs) {
+    const bad = new Set();
+    for (let k = 0; k < m; k++) {
+      const j = (k + 1) % m, T0 = U[k], T1 = U[j], B0 = Bs[k], B1 = Bs[j];
+      let ok = (B0.x - T0.x) * nx[k] + (B0.y - T0.y) * ny[k] >= -1e-9 &&
+               (B1.x - T1.x) * nx[k] + (B1.y - T1.y) * ny[k] >= -1e-9;
+      const fx = B1.x - B0.x, fy = B1.y - B0.y, fl = Math.hypot(fx, fy);
+      if (ok && fl >= EPS)                                       // sonst Fächerdreieck
+        ok = fx * ex[k] + fy * ey[k] >= 0 &&                     // Basiskante nicht umgedreht
+             (B0.x - T1.x) * side * fy - (B0.y - T1.y) * side * fx >= -1e-9 * fl;
+      if (!ok) { bad.add(k); bad.add(j); }
+    }
+    for (let s = 1; s <= 8; s++) {
+      const lam = s / 8, S = [];
+      for (let k = 0; k < m; k++) {
+        const j = (k + 1) % m;
+        S.push({ x: U[k].x + lam * (Bs[k].x - U[k].x), y: U[k].y + lam * (Bs[k].y - U[k].y) });
+        S.push({ x: U[j].x + lam * (Bs[k].x - U[j].x), y: U[j].y + lam * (Bs[k].y - U[j].y) });
+      }
+      for (const [a, b] of crossings(S, false))
+        for (const w of [a >> 1, b >> 1]) { bad.add(w); bad.add((w + 1) % m); }
+      // Schnitt umgestülpt (z. B. Haarriss-Loch, dessen Spitzen stehen): keine Kreuzung,
+      // aber falscher Umlaufsinn → ganze Kontur früher anhalten
+      let sa = 0;
+      for (let q = 0; q < S.length; q++) { const p = S[q], r = S[(q + 1) % S.length]; sa += p.x * r.y - r.x * p.y; }
+      if (sa * area < 0 && Math.abs(sa) > EPS) for (let k = 0; k < m; k++) bad.add(k);
+    }
+    if (flipped(Bs)) for (let k = 0; k < m; k++) bad.add(k);   // Basis gespiegelt
+    return bad;
+  }
+  // Probleme, die schon die Druckfläche selbst hat (Kontur kreuzt/überlappt sich, z. B.
+  // Steg ohne Breite oder Schlaufe an einer Ecke): die behebt kein Versatz.
+  const bad0 = problems(U);
+  // Betroffene Punkte früher anhalten (steilere Wand nur dort), neu rechnen
+  let bad = problems(B);
+  for (let iter = 0; iter < 40 && bad.size; iter++) {
+    for (const v of bad) freezeAt[v] = 0.6 * Math.min(freezeAt[v], B.stop[v]);
+    B = simulate(D, freezeAt);
+    bad = problems(B);
+  }
+  // Langer, (fast) parallelwandiger Spalt < 2·|offset|: Die echte Talsohle wäre dort
+  // waagrecht auf Höhe reliefD·(1 − Spalt/(2·|offset|)); mit einem Basispunkt je
+  // Konturpunkt geht das nicht. Der Fächer läuft dann flacher als der Anzug und bildet
+  // eine Rampe, die am geschlossenen Ende fast die Druckhöhe erreicht → melden.
+  let ramps = 0;
+  for (let k = 0; k < m; k++) {
+    const j = (k + 1) % m;
+    if (same(B[k], B[j]) && (B[k].x - U[k].x) * nx[k] + (B[k].y - U[k].y) * ny[k] > 2 * d) ramps++;
+  }
+  if (ramps) taperWarnings.push(`Ein Spalt im Motiv ist schmaler als ${(2 * d).toFixed(2)} mm: ` +
+    `Sein Boden steigt zum engen Ende hin fast auf Druckhöhe an und kann Farbe annehmen. Taper verkleinern oder Motiv prüfen.`);
+  if (bad.size && [...bad].every(v => bad0.has(v))) {
+    taperWarnings.push('Eine Kontur überschneidet sich schon in der Druckfläche (Schlaufe oder Steg ohne Breite); ' +
+      'dort sind die Wände senkrecht. Motiv prüfen.');
+  } else if (bad.size) {
+    // Notbremse: Versatz dieser Kontur gleichmässig verkleinern, bis das Netz gültig ist
+    const full = B;
+    let f = 1;
+    do {
+      f *= 0.8;
+      B = full.map((p, k) => ({ x: U[k].x + f * (p.x - U[k].x), y: U[k].y + f * (p.y - U[k].y) }));
+    } while (f > 1e-3 && problems(B).size);
+    if (f <= 1e-3) B = U.map(p => ({ x: p.x, y: p.y }));
+    taperWarnings.push(f <= 1e-3
+      ? `Eine Kontur liess sich nicht sauber mit Taper bauen; sie hat überall senkrechte Wände. Motiv prüfen.`
+      : `Eine Kontur liess sich nur mit ${(f * d).toFixed(3)} mm statt ${d} mm Taper sauber bauen; ` +
+        `ihre Wände sind überall steiler.`);
+  }
+
+  return pts.map((_, i) => new THREE.Vector2(B[uOf[i]].x, B[uOf[i]].y));
 }
 
 /**
@@ -660,8 +1096,16 @@ function buildTaperedPrism(shape, reliefD, taperAmt, cx, cy, scale, mirrorSign) 
     -(p.y - cy) * scale
   ));
 
-  const outerTop  = tx(shape.getPoints(res));
-  const holesTop  = shape.holes.map(h => tx(h.getPoints(res)));
+  // Bereinigt (Mikro-Punkte) – gilt für Druckfläche und Basis gleichermassen.
+  // Was danach keine Fläche mehr hat (Staub unter 5 µm), fällt weg.
+  const outerTop  = cleanContour(tx(shape.getPoints(res)));
+  const holesTop  = shape.holes.map(h => cleanContour(tx(h.getPoints(res))))
+                               .filter(h => h.length >= 3);
+  if (outerTop.length < 3) {
+    const empty = new THREE.BufferGeometry();
+    empty.setAttribute('position', new THREE.Float32BufferAttribute([], 3));
+    return empty;
+  }
 
   // Basis: outer nach außen, Löcher nach innen (Material wird unten breiter)
   const outerBase = offsetContour(outerTop,  +taperAmt);
@@ -702,6 +1146,22 @@ function buildTaperedPrism(shape, reliefD, taperAmt, cx, cy, scale, mirrorSign) 
 
   const tris = triangulateWithEarcut(outerTop, holesTop);
 
+  // Basis: Dreiecke der Druckfläche wiederverwenden (gleiche Punkte wie die Wände,
+  // keine T-Stösse). Wo enge Spalten an der Basis zugelaufen sind, kann dabei ein
+  // Dreieck umklappen – dann die Basis-Kontur separat triangulieren.
+  const area2 = (p, q, r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+  // Ein Druckflächen-Dreieck mit Fläche ≈ 0 hat keine eigene Richtung – dann gegen
+  // den Umlaufsinn aller Dreiecke prüfen, sonst bliebe ein umgeklapptes Basisbild unbemerkt.
+  let sgAll = 0;
+  for (const [a, b, c] of tris) sgAll += area2(flatTop[a], flatTop[b], flatTop[c]);
+  sgAll = Math.sign(sgAll) || 1;
+  const flipped = tris.some(([a, b, c]) => {
+    const at = area2(flatTop[a], flatTop[b], flatTop[c]);
+    const sg = at > 1e-12 ? 1 : at < -1e-12 ? -1 : sgAll;
+    return area2(flatBase[a], flatBase[b], flatBase[c]) * sg < -1e-12;
+  });
+  const trisBase = flipped ? triangulateWithEarcut(outerBase, holesBase) : tris;
+
   const verts   = [];
   const indices = [];
   // Mirror erst hier auf x anwenden – nach der Triangulierung.
@@ -715,7 +1175,7 @@ function buildTaperedPrism(shape, reliefD, taperAmt, cx, cy, scale, mirrorSign) 
   // ── Basis unten (z=0), Normalen in −Z → Winding umkehren ──────────
   const baseOff = verts.length / 3;
   for (const p of flatBase) v(p.x, p.y, 0);
-  for (const [a, b, c] of tris) indices.push(baseOff+a, baseOff+c, baseOff+b);
+  for (const [a, b, c] of trisBase) indices.push(baseOff+a, baseOff+c, baseOff+b);
 
   // ── Seitenwände: verbinden je top[i]→top[i+1] mit base[i]→base[i+1] ──
   // Adaptive Winding-Erkennung pro Kontur. Für holes wird die Logik invertiert,
